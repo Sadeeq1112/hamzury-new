@@ -3,6 +3,9 @@ import { prisma } from "@/lib/db";
 import { readReceipt } from "@/lib/uploads";
 import { getAdminSession } from "@/lib/auth";
 
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await getAdminSession())) {
     return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
@@ -13,12 +16,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "No receipt on this payment." }, { status: 404 });
   }
   try {
-    const buf = await readReceipt(payment.receiptPath);
-    return new NextResponse(new Uint8Array(buf), {
+    const { body, contentType } = await readReceipt(payment.receiptPath);
+    const payload: BodyInit = Buffer.isBuffer(body) ? new Uint8Array(body) : body;
+    return new NextResponse(payload, {
       headers: {
-        "Content-Type": payment.receiptMime || "application/octet-stream",
+        "Content-Type": payment.receiptMime || contentType || "application/octet-stream",
         "Content-Disposition": `inline; filename="${encodeURIComponent(payment.receiptName || "receipt")}"`,
-        "Cache-Control": "private, max-age=3600"
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch {

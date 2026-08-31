@@ -989,6 +989,53 @@ export function bootHamzury() {
     });
   }
 
+  async function sendReceipt(file, kind) {
+    const st = $("#receipt-status");
+    const url = "/api/applications/" + encodeURIComponent(A.ref) + "/receipt";
+    if (process.env.NEXT_PUBLIC_VERCEL_ENV) {
+      try {
+        const { upload } = await import("@vercel/blob/client");
+        const blob = await upload("receipts/" + A.ref + "/" + (file.name || "receipt"), file, {
+          access: "private",
+          handleUploadUrl: url,
+          multipart: file.size > 4 * 1024 * 1024,
+          clientPayload: JSON.stringify({ paymentType: kind, originalName: file.name || "receipt" })
+        });
+        if (blob && blob.url) {
+          const attach = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "attach",
+              url: blob.url,
+              contentType: blob.contentType,
+              name: file.name || "receipt",
+              paymentType: kind
+            })
+          });
+          if (!attach.ok) {
+            const d = await attach.json().catch(() => ({}));
+            throw new Error(d.error || "Upload failed.");
+          }
+          return true;
+        }
+      } catch (e) {
+        if (e && typeof e === "object" && "message" in e && String(e.message).includes("Upload failed")) throw e;
+      }
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("type", kind);
+    const r = await fetch(url, { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) {
+      if (st) st.textContent = d.error || "Upload failed.";
+      toast(d.error || "Upload failed.", "bad");
+      return false;
+    }
+    return true;
+  }
+
   async function uploadReceipt() {
     const input = $("#receipt");
     if (!input || !input.files || !input.files[0]) {
@@ -999,21 +1046,15 @@ export function bootHamzury() {
       toast("Missing reference. Go back and save your details.", "bad");
       return;
     }
-    const fd = new FormData();
-    fd.append("file", input.files[0]);
-    fd.append("type", A.receiptKind || "APPLICATION_FEE");
+    const file = input.files[0];
+    const kind = A.receiptKind || "APPLICATION_FEE";
     const st = $("#receipt-status");
     if (st) st.textContent = "Uploading…";
     try {
-      const r = await fetch("/api/applications/" + encodeURIComponent(A.ref) + "/receipt", { method: "POST", body: fd });
-      const d = await r.json();
-      if (!r.ok) {
-        if (st) st.textContent = d.error || "Upload failed.";
-        toast(d.error || "Upload failed.", "bad");
-        return;
-      }
+      const ok = await sendReceipt(file, kind);
+      if (!ok) return;
       A.receiptUploaded = true;
-      if (A.receiptKind === "PROGRAMME_FEE") A.progReceipt = true;
+      if (kind === "PROGRAMME_FEE") A.progReceipt = true;
       else A.appReceipt = true;
       if (st) st.textContent = "Receipt received. A person will check it.";
       toast("Receipt received", "ok");
