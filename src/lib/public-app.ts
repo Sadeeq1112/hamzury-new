@@ -989,38 +989,64 @@ export function bootHamzury() {
     });
   }
 
+  async function storageCfg() {
+    try {
+      const r = await fetch("/api/storage");
+      if (!r.ok) return { blob: false, clientUpload: false, access: "private" };
+      return await r.json();
+    } catch {
+      return { blob: false, clientUpload: false, access: "private" };
+    }
+  }
+
   async function sendReceipt(file, kind) {
     const st = $("#receipt-status");
     const url = "/api/applications/" + encodeURIComponent(A.ref) + "/receipt";
-    if (process.env.NEXT_PUBLIC_VERCEL_ENV) {
+    const cfg = await storageCfg();
+    if (cfg.clientUpload) {
       try {
         const { upload } = await import("@vercel/blob/client");
-        const blob = await upload("receipts/" + A.ref + "/" + (file.name || "receipt"), file, {
-          access: "private",
-          handleUploadUrl: url,
-          multipart: file.size > 4 * 1024 * 1024,
-          clientPayload: JSON.stringify({ paymentType: kind, originalName: file.name || "receipt" })
-        });
-        if (blob && blob.url) {
-          const attach = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "attach",
-              url: blob.url,
-              contentType: blob.contentType,
-              name: file.name || "receipt",
-              paymentType: kind
-            })
-          });
-          if (!attach.ok) {
-            const d = await attach.json().catch(() => ({}));
-            throw new Error(d.error || "Upload failed.");
+        const pathname = "receipts/" + A.ref + "/" + (file.name || "receipt");
+        const payload = JSON.stringify({ paymentType: kind, originalName: file.name || "receipt" });
+        const preferred = cfg.access === "public" ? "public" : "private";
+        const attempts = preferred === "public" ? ["public", "private"] : ["private", "public"];
+        let lastErr;
+        for (let i = 0; i < attempts.length; i++) {
+          try {
+            const blob = await upload(pathname, file, {
+              access: attempts[i],
+              handleUploadUrl: url,
+              multipart: file.size > 4 * 1024 * 1024,
+              clientPayload: payload
+            });
+            if (blob && blob.url) {
+              const attach = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "attach",
+                  url: blob.url,
+                  contentType: blob.contentType,
+                  name: file.name || "receipt",
+                  paymentType: kind
+                })
+              });
+              if (!attach.ok) {
+                const d = await attach.json().catch(() => ({}));
+                throw new Error(d.error || "Upload failed.");
+              }
+              return true;
+            }
+          } catch (e) {
+            lastErr = e;
           }
-          return true;
         }
+        throw lastErr || new Error("Upload failed.");
       } catch (e) {
-        if (e && typeof e === "object" && "message" in e && String(e.message).includes("Upload failed")) throw e;
+        const message = e && typeof e === "object" && "message" in e ? String(e.message) : "Upload failed.";
+        if (st) st.textContent = message;
+        toast(message, "bad");
+        return false;
       }
     }
     const fd = new FormData();

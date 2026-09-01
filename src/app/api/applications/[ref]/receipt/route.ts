@@ -6,7 +6,8 @@ import { upsertReceipt } from "@/lib/receipts";
 import { APPLICATION_FEE } from "@/lib/catalog";
 import {
   saveReceipt,
-  blobEnabled,
+  blobClientUploadEnabled,
+  blobToken,
   isBlobUrl,
   ALLOWED_RECEIPT_TYPES,
   MAX_RECEIPT_BYTES
@@ -93,13 +94,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ ref: st
     }
 
     if (body.type === "blob.generate-client-token" || body.type === "blob.upload-completed") {
-      if (!blobEnabled()) {
-        return NextResponse.json({ error: "Blob storage is not configured." }, { status: 400 });
+      const token = blobToken();
+      if (!blobClientUploadEnabled() || !token) {
+        return NextResponse.json(
+          {
+            error:
+              "Blob client uploads need BLOB_READ_WRITE_TOKEN (OIDC is not enough for browser uploads)."
+          },
+          { status: 400 }
+        );
       }
       try {
         const json = await handleUpload({
           body: body as unknown as HandleUploadBody,
           request: req,
+          token,
           onBeforeGenerateToken: async (_pathname, clientPayload) => {
             const meta = parseTokenMeta(clientPayload);
             requireAppFeeFirst(app, meta.paymentType);
@@ -131,7 +140,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ ref: st
     if (body.action === "attach") {
       const type = asPaymentType(body.paymentType);
       const url = typeof body.url === "string" ? body.url : "";
-      if (!type || !isBlobUrl(url) || !url.toUpperCase().includes(ref)) {
+      const haystack = decodeURIComponent(url).toUpperCase();
+      if (!type || !isBlobUrl(url) || !haystack.includes(ref)) {
         return NextResponse.json({ error: "Invalid receipt." }, { status: 400 });
       }
       try {

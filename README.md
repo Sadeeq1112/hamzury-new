@@ -24,6 +24,8 @@ npm install
 npx prisma migrate dev
 npm run db:seed
 npm run dev
+# npm run db:clear -- --yes          # wipe applications, payments, enquiries
+# npm run db:clear -- --seed --yes   # seeded demo rows only
 ```
 
 - Site: http://localhost:3000
@@ -67,7 +69,8 @@ Set these on the Vercel project for Production (and Preview, with a preview data
 | `DIRECT_URL` | Neon **direct** connection string |
 | `ADMIN_PASSWORD` | Staff desk password |
 | `ADMIN_SECRET` | Long random string (`openssl rand -base64 32`) |
-| `BLOB_READ_WRITE_TOKEN` | Set automatically when the Blob store is connected |
+| `BLOB_READ_WRITE_TOKEN` | Set automatically when the Blob store is connected. Required for browser uploads (OIDC is not enough). Pull locally with `npx vercel env pull .env.local` |
+| `BLOB_ACCESS` | `private` or `public` — must match the Blob store. Default `private` |
 
 ### 4. Deploy
 
@@ -84,6 +87,14 @@ DATABASE_URL="postgresql://..." DIRECT_URL="postgresql://..." npm run db:seed
 ```
 
 If `BLOB_READ_WRITE_TOKEN` is in that shell environment, the seed uploads placeholder receipts to Blob. Otherwise it writes them next to the project (useless on Neon — skip token-less seeding against production).
+
+To remove that data (and any other applications / enquiries):
+
+```bash
+DATABASE_URL="postgresql://..." DIRECT_URL="postgresql://..." BLOB_READ_WRITE_TOKEN="…" npm run db:clear -- --yes
+# or only the seeded demo rows:
+npm run db:clear -- --seed --yes
+```
 
 ### 5. Check
 
